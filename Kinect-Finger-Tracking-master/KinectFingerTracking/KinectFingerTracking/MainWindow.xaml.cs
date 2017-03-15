@@ -14,6 +14,7 @@ using Emgu.CV.Structure;
 using Emgu.Util;
 using Emgu.CV.CvEnum;
 
+
 namespace KinectFingerTracking
 {
     /// <summary>
@@ -21,11 +22,15 @@ namespace KinectFingerTracking
     /// </summary>
     public partial class MainWindow : Window
     {
+        private const double MI = 0.0062831853071795F;
         private bool frame_freeze = false;
         private bool calib_finished = false;
         private bool need_calib = true;
         private Matrix<float> R = new Matrix<float>(3, 3);
         private Matrix<float> T = new Matrix<float>(3, 1);
+
+        private Matrix<float> R_A = new Matrix<float>(3, 3);
+        List<Matrix<float>> Points_A = new List<Matrix<float>>();
 
         List<CameraSpacePoint> k_list = new List<CameraSpacePoint>();
         List<Matrix<float>> l_list = new List<Matrix<float>>();
@@ -39,7 +44,7 @@ namespace KinectFingerTracking
 
         // Create a new reference of a HandsController.
         private HandsController _handsController = null;
-        private Adjust adjust = new Adjust();
+        private Adjust adjust;
 
         /// <summary>
         /// The main window of the app.
@@ -48,7 +53,7 @@ namespace KinectFingerTracking
         {
             InitializeComponent();
             
-            adjust.my_ok += new Adjust.OK_Dele(OK_event);
+
             if(need_calib)
             {
                 calib_finished = false;
@@ -142,9 +147,48 @@ namespace KinectFingerTracking
 
         }
 
-        private void OK_event(int r_x, int r_y)
+        private void Comp_event()
         {
+            R = R_A * R;
+            T = R_A * T;
+            frame_freeze = false;
+        }
 
+        private void OK_event(int r_x, int r_y, int r_z, int s_x, int s_y, int s_z)
+        {
+            canvas.Children.Clear();
+            double cos_1 = Math.Cos(r_x * MI);
+            double sin_1 = Math.Sin(r_x * MI);
+            double cos_2 = Math.Cos(r_y * MI);
+            double sin_2 = Math.Sin(r_y * MI);
+            double cos_3 = Math.Cos(r_z * MI);
+            double sin_3 = Math.Sin(r_z * MI);
+            R_A[0, 0] = Convert.ToSingle(cos_2 * cos_3) * (1 - s_x/2000.0F);
+            R_A[0, 1] = Convert.ToSingle(cos_1 * sin_3 + sin_1 * sin_2 * cos_3);
+            R_A[0, 2] = Convert.ToSingle(sin_1 * sin_3 - cos_1 * sin_3 * cos_3);
+            R_A[1, 0] = Convert.ToSingle(-1 * cos_2 * sin_3);
+            R_A[1, 1] = Convert.ToSingle(cos_1 * cos_3 - sin_1* sin_2* sin_3) * (1 - s_y/2000.0F);
+            R_A[1, 2] = Convert.ToSingle(sin_1 * cos_3 + cos_1 * sin_2 * sin_3);
+            R_A[2, 0] = Convert.ToSingle(sin_2);
+            R_A[2, 1] = Convert.ToSingle(-1 * sin_1 * cos_2);
+            R_A[2, 2] = Convert.ToSingle(cos_1 * cos_2) * (1 - s_z/2000.0F);
+
+            List<Matrix<float>> current_points = new List<Matrix<float>>();
+            for(int i =0; i< Points_A.Count(); i++)
+            {
+                Matrix<float> temp_point = new Matrix<float>(3, 1);
+                temp_point = R_A * Points_A[i];
+                current_points.Add(temp_point);
+            }
+            for (int pointn = 0; pointn < 5; pointn++)
+            {
+                DrawEllipse(current_points[pointn], Brushes.Red, 5.0);// 0 ~ 4 fingertips
+            }
+            DrawEllipse(current_points[5], Brushes.BlueViolet, 7.0);//palm position
+            for (int pointn = 6; pointn < current_points.Count(); pointn++)
+            {
+                DrawEllipse(current_points[pointn], Brushes.Yellow, 3.0);// finger bones
+            }
         }
 
         private void DepthReader_FrameArrived(object sender, DepthFrameArrivedEventArgs e)
@@ -326,8 +370,11 @@ namespace KinectFingerTracking
                         //MessageBox.Show("projection done!");
                         if (MessageBox.Show("Start adjusting?", "Projection done!", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes)
                         {
-                            
+                            Points_A = points_kl;
+                            adjust = new Adjust();
                             adjust.Show();
+                            adjust.my_ok += new Adjust.OK_Dele(OK_event);
+                            adjust.my_comp += new Adjust.Comp_Dele(Comp_event);
                             return;
                         }
                         else
